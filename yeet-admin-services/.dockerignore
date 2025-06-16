@@ -1,0 +1,12 @@
+# Git and Docker files
+.git
+.gitignore
+Dockerfile
+docker-compose.yml
+
+# Dependencies and build output (handled inside Docker)
+node_modules
+dist
+
+# Environment variables should not be copied into the image
+.env

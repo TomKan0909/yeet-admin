@@ -1,0 +1,90 @@
+version: '3.8'
+
+services:
+  # The PostgreSQL Database Service
+  postgres:
+    image: postgres:15-alpine
+    container_name: wallet-postgres
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Database Seeding Service
+  seed:
+    image: node:18-alpine
+    container_name: wallet-seed
+    working_dir: /app
+    volumes:
+      - ./database/src:/app/src
+      - ./database/package.json:/app/package.json
+      - ./database/pnpm-lock.yaml:/app/pnpm-lock.yaml
+      - ./database/tsconfig.json:/app/tsconfig.json
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_HOST: postgres
+    command: >
+      sh -c "
+        npm install -g pnpm &&
+        pnpm install &&
+        pnpm seed
+      "
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  # The Node.js Backend Service
+  yeet-admin-services:
+    build:
+      context: ./yeet-admin-services
+      dockerfile: Dockerfile
+    container_name: wallet-backend
+    ports:
+      - '3001:3001'
+    env_file:
+      - ./yeet-admin-services/.env # Path to .env is now relative to the root
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_HOST: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+      seed:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # Next.js Frontend Service
+  yeet-admin:
+    build:
+      context: ./applications/yeet-admin
+      dockerfile: Dockerfile
+    container_name: wallet-frontend
+    ports:
+      - '3000:3000'
+    environment:
+      - NEXT_PUBLIC_API_URL=http://yeet-admin-services:3000
+    depends_on:
+      - yeet-admin-services
+    restart: unless-stopped
+
+# Top-level volume definition
+volumes:
+  postgres-data:
